@@ -27,15 +27,14 @@ classifiers = [
     "Typing :: Typed",
 ]
 dynamic = ["version"] # version is set in src/hizt/__init__.py
-dependencies = ["hist"]
+dependencies = ["hist", "zarr<3"]
 
 [project.optional-dependencies]
-hdf5 = ["h5py"]
-zarr = ["zarr"]
-blosc2 = ["blosc2"]
-# dev envs
-test = ["pytest >=6", "pytest-cov >=3"]
-docs = [
+# dev env
+dev = [
+    "ipython",
+    "pytest >=6",
+    "pytest-cov >=3",
     "sphinx",
     "myst-parser",
     "myst-nb",
@@ -45,7 +44,6 @@ docs = [
     "sphinx-design",
     "sphinx-togglebutton",
 ]
-extra = ["ipython", "ruff", "pre_commit", "mypy"]
 
 [project.urls]
 Homepage = "https://github.com/pfackeldey/hizt"
@@ -122,36 +120,3 @@ unfixable = [
 ]
 flake8-unused-arguments.ignore-variadic-names = true
 isort.required-imports = ["from __future__ import annotations"]
-
-
-[tool.pixi.project]
-channels = ["conda-forge"]
-platforms = ["linux-64", "osx-arm64", "osx-64"]
-
-[tool.pixi.dependencies]
-hist = "*"
-h5py = "*"
-zarr = "*"
-# blosc2 = "*" <- breaks with conda-forge, why?
-
-[tool.pixi.pypi-dependencies]
-hizt = { path = ".", editable = true }
-
-[tool.pixi.environments]
-default = { solve-group = "default" }
-dev = { features = [
-    "hdf5",
-    "zarr",
-    "blosc2",
-    "test",
-    "docs",
-    "extra",
-], solve-group = "default" }
-docs = { features = ["docs"], solve-group = "default" }
-test = { features = ["test"], solve-group = "default" }
-
-[tool.pixi.tasks]
-test = "pytest"
-lint = "ruff check . --fix --show-fixes"
-checkall = "pre-commit run --all-files"
-builddocs = "rm -rf build/ && sphinx-build -M html ./docs ./build -W --keep-going"

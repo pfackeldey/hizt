@@ -43,7 +43,7 @@ jobs:
           allow-prereleases: true
 
       - name: Install package
-        run: python -m pip install .[hdf5,zarr,blosc2,test]
+        run: python -m pip install .
 
       - name: Test package
         run: >-

@@ -166,3 +166,7 @@ cython_debug/
 pixi.lock
 .ruff_cache/
 pyrightconfig.json
+
+
+# output
+hist.zarr

@@ -7,8 +7,10 @@ We welcome contributions to the project. Please follow the guidelines below.
 We use [pixi](https://pixi.sh/latest/) to manage the development environment.
 
 ```shell
-pixi install
-pixi shell -e dev
+uv venv
+uv pip install -e ".[dev]"
+
+source .venv/bin/activate
 ```
 
 ### Testing
@@ -16,15 +18,7 @@ pixi shell -e dev
 Use pytest to run the unit checks:
 
 ```bash
-pixi run test
-```
-
-### Linting
-
-We use `ruff` to lint the code. Run the following command to check the code:
-
-```bash
-pixi run lint
+pytest .
 ```
 
 ### Check all files
@@ -33,5 +27,5 @@ pixi run lint
 run the following command:
 
 ```bash
-pixi run checkall
+pre-commit run --all-files
 ```

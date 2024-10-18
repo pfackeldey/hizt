@@ -12,10 +12,17 @@ __status__ = "Development"
 __version__ = "0.0.1"
 
 
+# expose public API
 __all__ = [
     "__version__",
+    "array_factory",
+    "Histogram",
 ]
 
 
 def __dir__():
     return __all__
+
+
+from hizt import array_factory  # noqa: E402
+from hizt.hist import Histogram  # noqa: E402
