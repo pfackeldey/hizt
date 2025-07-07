@@ -14,9 +14,9 @@ __version__ = "0.0.1"
 
 # expose public API
 __all__ = [
+    "Histogram",
     "__version__",
     "array_factory",
-    "Histogram",
 ]
 
 
