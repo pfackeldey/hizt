@@ -139,7 +139,7 @@ class Histogram:
         return self._hiadd(other)
 
     def fill(self, *args, **kwargs) -> None:
-        self += self._copy(cls=hist.Hist, empty="ungrow").fill(*args, **kwargs)  # noqa: PLW0642
+        self += self._copy(cls=hist.Hist, empty="ungrow").fill(*args, **kwargs)
 
     # utility functions, all start with an underscore
     def _adopt(self, axes):
