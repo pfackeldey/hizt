@@ -26,6 +26,7 @@ class IcechunkHist:
         *axes: bh.axis.Axis,
         storage: hist.storage.Storage,
         repo: ic.Repository,
+        __skip_create__: bool = False,
     ) -> None:
         self.axes = hist.axis.NamedAxesTuple(axes)
         self.storage = storage
@@ -37,21 +38,29 @@ class IcechunkHist:
             msg = f"Unsupported storage type: {self.storage_type()}"
             raise TypeError(msg)
 
-        # get init icechunk session
-        init_session = self.get_icechunk_session()
+        if not __skip_create__:
+            """Initialize the histogram by creating the underlying zarr array."""
+            session = self.repo.writable_session(branch="main")
+            _ = zarr.create_array(
+                session.store,
+                fill_value=0,
+                shape=self.axes.extent,
+                chunks=self.chunks,
+                dtype=self.dtype,
+            )
+            session.commit(message="Initialize histogram")
 
-        # create the underlying zarr array
-        _ = zarr.create(
-            store=init_session.store,
-            fill_value=0,
-            shape=self.axes.extent,
-            chunks=self.chunks,
-            dtype=self.dtype,
+    @classmethod
+    def from_icechunk_histogram(cls, other: IcechunkHist) -> IcechunkHist:
+        """Create a new IcechunkHist from an existing one."""
+        # TODO: we should also add a `from_icechunk_repository` method
+        # but this one needs first to store the axes and storage in the repository as well
+        return cls(
+            *other.axes,
+            storage=other.storage,
+            repo=other.repo,
+            __skip_create__=True,
         )
-        _.attrs["finished"] = []
-
-        # initialize the histogram
-        init_session.commit("Initialize histogram")
 
     @property
     def chunks(self) -> tuple[int, ...]:
@@ -60,12 +69,12 @@ class IcechunkHist:
 
     @property
     def readonly(self) -> zarr.Array:
-        """Return the underlying zarr array."""
+        """Return a readonly version of the underlying zarr array."""
         session = self.repo.readonly_session(branch="main")
         return self.get_zarr_array(session.store)
 
     def get_zarr_array(self, store) -> zarr.Array:
-        """Return the underlying zarr array."""
+        """Access the underlying zarr array."""
         return zarr.open_array(
             store,
             shape=self.axes.extent,
@@ -171,20 +180,20 @@ class IcechunkHist:
         # prepare metadata and axes
         idx = _get_slice(self.axes, other)
 
+        work = []
+        for ax in other.axes:
+            if isinstance(ax, _categorical_axes):
+                work += [*ax]  # type: ignore
+
         def do(session: ic.Session) -> None:
             ondisk_hist = self.get_zarr_array(session.store)
             # write the histogram
             ondisk_hist[idx] += np.squeeze(np.asarray(other.view(True)))
-            # update the metadata
-            work = []
-            for ax in other.axes:
-                if isinstance(ax, _categorical_axes):
-                    work += [*ax]  # type: ignore
-            old = ondisk_hist.attrs["finished"]
-            ondisk_hist.attrs["finished"] = old + [tuple(work)]
 
         # resolve merge conflicts
-        self.resolve_merge_conflict(do, message="Fill histogram on disk")
+        self.resolve_merge_conflict(
+            do, message="Fill histogram on disk", metadata={"finished": work}
+        )
         return self
 
     def resolve_merge_conflict(

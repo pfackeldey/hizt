@@ -82,7 +82,11 @@ for commit in hist.history():
 
 # get information of what was processed up to the last commit (HEAD@main)
 all_work = set(it.product(hist.axes[0], hist.axes[1]))
-finished_work = set(map(tuple, hist.readonly.attrs["finished"]))
+finished_work = set()
+for commit in hist.history():
+    finished = commit.metadata.get("finished", None)
+    if finished is not None:
+        finished_work.add(tuple(finished))
 remaining_work = all_work - finished_work
 
 # we skipped processing "QCD" earlier with `continue`
