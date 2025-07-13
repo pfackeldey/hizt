@@ -79,8 +79,8 @@ class IcechunkHist:
     def storage_type(self) -> type[hist.storage.Storage]:
         return type(self.storage)
 
-    def history(self, branch: str = "main") -> tp.Iterator:
-        yield from self.repo.ancestry(branch=branch)
+    def history(self) -> tp.Iterator:
+        yield from self.repo.ancestry(branch="main")
 
     @property
     def ndim(self) -> int:
@@ -120,21 +120,21 @@ class IcechunkHist:
         threads: int | None = None,
         **kwargs: ArrayLike,  # allow only keyword arguments for axes
     ) -> None:
-        axes = self.axes
         tmp_axes = []
-        for ax in axes:
+        for ax in self.axes:
+            if not (ax_name := ax.name):
+                raise ValueError(f"Axis {ax} must have a name for filling")
+            if ax_name not in kwargs:
+                raise ValueError(f"Missing keyword argument for axis {ax_name}")
             if isinstance(ax, _categorical_axes):
-                if not (ax_name := ax.name):
-                    raise ValueError(f"Axis {ax} must have a name for filling")
-                if ax_name not in kwargs:
-                    raise ValueError(f"Missing keyword argument for axis {ax_name}")
                 cats: list[str | int] = kwargs[ax_name]  # type: ignore
                 if len(cats) != 1:
                     raise ValueError(
-                        f"Axis {ax} must have exactly one category for filling, got {len(cats)}"
+                        f"Currently, categorical axis {ax_name} must have exactly one category, got {cats}"
                     )
                 tmp_axes.append(
-                    # is there a better way to do this? a copy?
+                    # is there a better way to do this?
+                    # see: https://github.com/scikit-hep/hist/issues/616
                     type(ax)(
                         cats,
                         name=ax_name,
