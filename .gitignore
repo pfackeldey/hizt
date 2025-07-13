@@ -170,3 +170,4 @@ pyrightconfig.json
 
 # output
 hist.zarr
+.hist/

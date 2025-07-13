@@ -27,7 +27,7 @@ classifiers = [
     "Typing :: Typed",
 ]
 dynamic = ["version"] # version is set in src/hizt/__init__.py
-dependencies = ["hist", "zarr<3"]
+dependencies = ["hist", "icechunk", "zarr>3", "xarray"]
 
 [project.optional-dependencies]
 # dev env

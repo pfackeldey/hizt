@@ -1,40 +1,35 @@
-"""
-This is a re-implementation of https://git.rwth-aachen.de/3pia/cms_analyses/common/-/blob/master/utils/bh5.py
-
-In addition, it supports different array backends via the ArrayFactoryProtocol.
-"""
+from __future__ import annotations
 
 import typing as tp
-from itertools import product, starmap
+from functools import reduce
+from operator import mul
 
 import boost_histogram as bh
 import hist
+import icechunk as ic
 import numpy as np
+import zarr
+from hist._compat.typing import ArrayLike
 
-from hizt.array_factory import ArrayFactoryProtocol, default_array_factory
 from hizt.util import (
+    _categorical_axes,
     _get_chunks,
-    _merge_axis,
-    _merge_slices,
-    _regrow_axis,
-    _siadd,
+    _get_slice,
     _storage2dtype,
+    _to_var_str_dtype,
 )
 
 
-class Histogram:
+class IcechunkHist:
     def __init__(
         self,
         *axes: bh.axis.Axis,
-        storage: hist.storage.Storage | None = None,
-        metadata: tp.Any = None,
-        array_factory: ArrayFactoryProtocol = default_array_factory,
+        storage: hist.storage.Storage,
+        repo: ic.Repository,
     ) -> None:
         self.axes = hist.axis.NamedAxesTuple(axes)
-        if storage is None:
-            storage = hist.storage.Weight()
         self.storage = storage
-        self.metadata = metadata
+        self.repo = repo
 
         # create underlying zarr array
         self.dtype = _storage2dtype.get(self.storage_type())
@@ -42,11 +37,47 @@ class Histogram:
             msg = f"Unsupported storage type: {self.storage_type()}"
             raise TypeError(msg)
 
-        self._hist = array_factory(
+        # get init icechunk session
+        init_session = self.get_icechunk_session()
+
+        # create the underlying zarr array
+        _ = zarr.create(
+            store=init_session.store,
+            fill_value=0,
             shape=self.axes.extent,
             chunks=tuple(map(_get_chunks, self.axes)),
             dtype=self.dtype,
         )
+        _.attrs["finished"] = []
+
+        # initialize the histogram
+        init_session.commit("Initialize histogram")
+
+    @property
+    def readonly(self) -> zarr.Array:
+        """Return the underlying zarr array."""
+        return zarr.open_array(self.repo.readonly_session(branch="main").store)
+
+    def get_icechunk_session(self) -> ic.Session:
+        return self.repo.writable_session(branch="main")
+
+    def storage_type(self) -> type[hist.storage.Storage]:
+        return type(self.storage)
+
+    def history(self, branch: str = "main") -> tp.Iterator:
+        yield from self.repo.ancestry(branch=branch)
+
+    @property
+    def ndim(self) -> int:
+        return len(self.axes)
+
+    @property
+    def size(self) -> int:
+        return reduce(mul, self.axes.extent)
+
+    @property
+    def shape(self) -> tuple[int, ...]:
+        return self.axes.size
 
     def __repr__(self) -> str:
         # yoink the repr from boost-histogram
@@ -61,183 +92,102 @@ class Histogram:
         ret += f",{newline}".join([str(ax) for ax in self.axes])
         ret += f"{sep}{storage_newline}storage={self.storage_type()},"  # pylint: disable=not-callable
         ret += "\n)"
-        if hasattr(self._hist, "info"):
+        if hasattr(self.readonly, "info"):
             header = "Underlying histogram info:"
             ret += f"\n\n{header}"
             ret += f"\n{len(header) * '-'}"
-            ret += f"\n{self._hist.info}"
+            ret += f"\n{self.readonly.info}"
         return ret
 
-    def storage_type(self) -> type[hist.storage.Storage]:
-        return type(self.storage)
+    def fill(
+        self,
+        weight: ArrayLike | None = None,
+        sample: ArrayLike | None = None,
+        threads: int | None = None,
+        **kwargs: ArrayLike,  # allow only keyword arguments for axes
+    ) -> None:
+        axes = self.axes
+        tmp_axes = []
+        for ax in axes:
+            if isinstance(ax, _categorical_axes):
+                if not (ax_name := ax.name):
+                    raise ValueError(f"Axis {ax} must have a name for filling")
+                if ax_name not in kwargs:
+                    raise ValueError(f"Missing keyword argument for axis {ax_name}")
+                cats: list[str | int] = kwargs[ax_name]  # type: ignore
+                if len(cats) != 1:
+                    raise ValueError(
+                        f"Axis {ax} must have exactly one category for filling, got {len(cats)}"
+                    )
+                tmp_axes.append(
+                    # is there a better way to do this? a copy?
+                    type(ax)(
+                        cats,
+                        name=ax_name,
+                        label=ax.label,
+                        growth=ax.traits.growth,
+                        flow=False,
+                    )
+                )
+            else:
+                tmp_axes.append(ax)
 
-    @property
-    def ndim(self) -> int:
-        return len(self.axes)
+        broadcasted = np.broadcast_arrays(*kwargs.values())
+        bkwargs = {
+            k: _to_var_str_dtype(v)
+            for k, v in zip(kwargs.keys(), broadcasted, strict=False)
+        }
 
-    @property
-    def size(self) -> int:
-        return self._hist.size
-
-    @property
-    def shape(self) -> tuple[int, ...]:
-        return self.axes.size
-
-    @property
-    def has_flow(self):
-        return self.axes.size != self.axes.extent
-
-    @classmethod
-    def from_hist(cls, hist, **kwargs):
-        ret = cls(
-            *hist.axes, storage=hist.storage_type(), metadata=hist.metadata, **kwargs
+        # create a small temporary histogram
+        tmp_hist = hist.Hist(
+            *tmp_axes,
+            storage=self.storage,
         )
-        ret[:] = hist.view(flow=True)
-        return ret
 
-    def to_hist(self, cls=hist.Hist):
-        if not issubclass(cls, bh.Histogram):
-            msg = f"Unsupported histogram type: {cls}"
-            raise TypeError(msg)
-        return self._copy(cls)
-
-    def view(self, flow=False):
-        if flow or not self.has_flow:
-            return self._hist
-        raise NotImplementedError()
-
-    def copy(self):
-        return self._copy(None, empty=False)
-
-    def reset(self):
-        return self._copy(None, empty=True)
-
-    def regrow(self, categories=(), cls=None, copy=True):
-        if categories is min:
-            categories = {
-                i: []
-                for i, ax in enumerate(self.axes)
-                if isinstance(ax, hist.axis.StrCategory) and ax.traits.growth
-            }
-        axes = self._mod_axes(categories)
-        if cls is None:
-            cls = type(self)
-
-        ret = cls(*axes, storage=self.storage, metadata=self.metadata)
-        if copy:
-            ret._hiadd(self)
-
-        return ret
-
-    def __setitem__(self, key, value) -> None:
-        assert isinstance(value, np.ndarray)
-        indices = self._expand_key(key)
-        self._hist[tuple(indices)] = value
-
-    def __iadd__(self, other):
-        self._adopt(other.axes)
-        return self._hiadd(other)
-
-    def fill(self, *args, **kwargs) -> None:
-        self += self._copy(cls=hist.Hist, empty="ungrow").fill(*args, **kwargs)
-
-    # utility functions, all start with an underscore
-    def _adopt(self, axes):
-        assert len(self.axes) == len(axes)
-        self.axes = hist.axis.NamedAxesTuple(
-            starmap(_merge_axis, zip(self.axes, axes, strict=False))
+        tmp_hist.fill(
+            weight=weight,
+            sample=sample,
+            threads=threads,
+            **bkwargs,
         )
-        if self._hist.shape != self.axes.extent:
-            self._hist.resize(self.axes.extent)
 
-    def _hiadd(self, other, set=False):
-        dst = self.view(flow=True)
-        src = other.view(flow=True)
-        for il, ir in starmap(
-            zip,
-            product(*starmap(_merge_slices, zip(self.axes, other.axes, strict=False))),
-        ):
-            dst[il] = src[ir] if set else _siadd(dst[il], src[ir])
+        self += tmp_hist
+
+    def __iadd__(self, other: hist.Hist) -> IcechunkHist:
+        # prepare metadata and axes
+        idx = _get_slice(self.axes, other)
+
+        def do(session: ic.Session) -> None:
+            ondisk_hist = zarr.open_array(session.store)
+            # write the histogram
+            ondisk_hist[idx] += np.squeeze(np.asarray(other.view(True)))
+            # update the metadata
+            work = []
+            for ax in other.axes:
+                if isinstance(ax, _categorical_axes):
+                    work += [*ax]  # type: ignore
+            old = ondisk_hist.attrs["finished"]
+            ondisk_hist.attrs["finished"] = old + [tuple(work)]
+
+        # resolve merge conflicts
+        self.resolve_merge_conflict(do, message="Fill histogram on disk")
         return self
 
-    def _copy(self, cls=None, empty: bool | str | None = None):
-        kwargs = {
-            "storage": self.storage,
-            "metadata": self.metadata,
-            "array_factory": type(self._hist),
-        }
-        if cls is None:
-            cls = type(self)
-        if empty == "ungrow":
-            axes = tuple(
-                _regrow_axis([], ax)
-                if isinstance(ax, hist.axis.StrCategory) and ax.traits.growth
-                else ax
-                for ax in self.axes
-            )
-        else:
-            axes = self.axes
-        if issubclass(cls, bh.Histogram):
-            kwargs.pop("array_factory", None)
-            ret = cls(*axes, **kwargs)
-        else:
-            ret = cls(*axes, **kwargs)
-        if empty is not None:
-            ret.view(flow=True)[...] = self.view(flow=True)[...]
-        return ret
-
-    def _mod_axes(self, categories):
-        if not isinstance(categories, dict):
-            categories = dict(enumerate(categories))
-
-        axes = list(self.axes)
-        for key, cats in categories.items():
-            if cats is None:
-                continue
-            idx = self._expand_k(key)
-            axes[idx] = _regrow_axis(cats, axes[idx])
-
-        return axes
-
-    def _expand_key(self, key):
-        # dictify
-        if not isinstance(key, dict):
-            if not isinstance(key, tuple):
-                key = (key,)
-            assert key.count(...) <= 1
-            if ... in key:
-                rev = key[::-1]
-                rev = key[: rev.index(...)]
-                key = dict(enumerate(key[: key.index(...)]))
-                key.update((-i, v) for i, v in enumerate(rev, start=1))
-            else:
-                key = dict(enumerate(key))
-
-        # build indices
-        indices = [slice(None)] * self.ndim
-        for k, v in key.items():
-            indices[Histogram._expand_k(self, k)] = v
-
-        for i, idx in enumerate(indices):
-            if callable(idx):
-                indices[i] = idx(self.axes[i])
-            elif isinstance(idx, str):  # type: ignore[unreachable]
-                indices[i] = self.axes[i].index(idx)  # type: ignore[unreachable]
-
-        return indices
-
-    def _expand_k(self, k):
-        if isinstance(k, bh.axis.Axis):
-            if k in self.axes:
-                return tuple(self.axes).index(k)
-            msg = f"axis {k!r} foreign to {self!r}"
-            raise ValueError(msg)
-        if isinstance(k, str):
-            if k in self.axes.name:
-                return self.axes.name.index(k)
-            msg = f"unknown key {k!r} among {self.axes!r}"
-            raise ValueError(msg)
-        if isinstance(k, int):
-            return k
-        msg = f"key {k!r} not understood"
-        raise ValueError(msg)
+    def resolve_merge_conflict(
+        self, do: tp.Callable, message: str, metadata: dict | None = None
+    ) -> None:
+        if metadata is None:
+            metadata = {}
+        metadata["tries"] = 1
+        # resolve merge conflicts:
+        # the strategy is to read the values corresponding to the HEAD of main branch,
+        # then, add the new values, and try to write them back
+        # if there is a conflict, we retry until we succeed (i.e. we're at the head of the branch)
+        while True:
+            try:
+                session = self.get_icechunk_session()
+                _ = do(session)
+                session.commit(message=message, metadata=metadata)
+                break
+            except ic.ConflictError:
+                metadata["tries"] += 1
