@@ -45,7 +45,7 @@ class IcechunkHist:
             store=init_session.store,
             fill_value=0,
             shape=self.axes.extent,
-            chunks=tuple(map(_get_chunks, self.axes)),
+            chunks=self.chunks,
             dtype=self.dtype,
         )
         _.attrs["finished"] = []
@@ -54,9 +54,24 @@ class IcechunkHist:
         init_session.commit("Initialize histogram")
 
     @property
+    def chunks(self) -> tuple[int, ...]:
+        """Return the chunks of the histogram."""
+        return tuple(map(_get_chunks, self.axes))
+
+    @property
     def readonly(self) -> zarr.Array:
         """Return the underlying zarr array."""
-        return zarr.open_array(self.repo.readonly_session(branch="main").store)
+        session = self.repo.readonly_session(branch="main")
+        return self.get_zarr_array(session.store)
+
+    def get_zarr_array(self, store) -> zarr.Array:
+        """Return the underlying zarr array."""
+        return zarr.open_array(
+            store,
+            shape=self.axes.extent,
+            chunks=self.chunks,
+            dtype=self.dtype,
+        )
 
     def get_icechunk_session(self) -> ic.Session:
         return self.repo.writable_session(branch="main")
@@ -92,11 +107,10 @@ class IcechunkHist:
         ret += f",{newline}".join([str(ax) for ax in self.axes])
         ret += f"{sep}{storage_newline}storage={self.storage_type()},"  # pylint: disable=not-callable
         ret += "\n)"
-        if hasattr(self.readonly, "info"):
-            header = "Underlying histogram info:"
-            ret += f"\n\n{header}"
-            ret += f"\n{len(header) * '-'}"
-            ret += f"\n{self.readonly.info}"
+        header = "Zarr store info:"
+        ret += f"\n\n{header}"
+        ret += f"\n{len(header) * '-'}"
+        ret += f"\n{self.readonly.info_complete()}"
         return ret
 
     def fill(
@@ -158,7 +172,7 @@ class IcechunkHist:
         idx = _get_slice(self.axes, other)
 
         def do(session: ic.Session) -> None:
-            ondisk_hist = zarr.open_array(session.store)
+            ondisk_hist = self.get_zarr_array(session.store)
             # write the histogram
             ondisk_hist[idx] += np.squeeze(np.asarray(other.view(True)))
             # update the metadata
