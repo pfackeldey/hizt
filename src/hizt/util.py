@@ -51,9 +51,8 @@ _categorical_axes = (
 
 
 def _get_chunks(ax):
-    # this chunks categorical axes with 1 chunk, all others with 1000
-    # the categorical one is intuitive, the other one is arbitrarily chosen.
-    return 1 if isinstance(ax, _categorical_axes) else 1000
+    # this chunks categorical axes with 1 chunk, all others with None
+    return 1 if isinstance(ax, _categorical_axes) else None
 
 
 def _get_slice(refaxes: hist.axis.NamedAxesTuple, hist: hist.Hist) -> tuple[int, ...]:
