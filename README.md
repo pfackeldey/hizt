@@ -45,7 +45,7 @@ hist = hizt.IcechunkHist(
 )
 
 
-# The following is user code, e.g. in the coffea.datasetor.dataset(...):
+# The following is user code, e.g. in the coffea.Processor.process(...):
 # ---
 pt_data = np.array([10., 20., 30., 40., 50.])
 
