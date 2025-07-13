@@ -59,7 +59,8 @@ for dataset in hist.axes[0]:
             category=np.array([cat]),
             pt=pt_data,
         )
-        # fill will automatically keep track on what has been finished processing in `hist.readonly.attrs["finished"]`
+        # fill will automatically keep track on what has been
+        # finished processing in `hist.readonly.attrs["finished"]`
         hist.fill(**data)
 # ---
 
@@ -83,6 +84,8 @@ for commit in hist.history():
 all_work = set(it.product(hist.axes[0], hist.axes[1]))
 finished_work = set(map(tuple, hist.readonly.attrs["finished"]))
 remaining_work = all_work - finished_work
-print("Still need to process:", remaining_work) # we skipped processing "QCD" earlier with `continue`
+
+# we skipped processing "QCD" earlier with `continue`
+print("Still need to process:", remaining_work)
 # Still need to process: {('QCD', '1e'), ('QCD', '2e'), ('QCD', '2mu'), ('QCD', '1mu')}
 ```
