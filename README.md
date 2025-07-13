@@ -31,7 +31,7 @@ import icechunk as ic
 import itertools as it
 from datetime import datetime
 import numpy as np
-from typing import NamedTuple
+
 
 storage = ic.local_filesystem_storage(f"./.hist/{str(datetime.now()).split()[1]}/")
 repo = ic.Repository.create(storage)
