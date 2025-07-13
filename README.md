@@ -79,7 +79,7 @@ for commit in hist.history():
 # SnapshotInfo(id="2D9RDECY98AC4TZ6QBJG", parent_id=1CECHNKREP0F1RSTCMT0, written_at=datetime.datetime(2025,7,13,19,33,6,675053, tzinfo=datetime.timezone.utc), message="Initialize...")
 # SnapshotInfo(id="1CECHNKREP0F1RSTCMT0", parent_id=None, written_at=datetime.datetime(2025,7,13,19,33,6,672469, tzinfo=datetime.timezone.utc), message="Repository...")
 
-# get information of what was dataseted up to the last commit
+# get information of what was processed up to the last commit (HEAD@main)
 all_work = set(it.product(hist.axes[0], hist.axes[1]))
 finished_work = set(map(tuple, hist.readonly.attrs["finished"]))
 remaining_work = all_work - finished_work
