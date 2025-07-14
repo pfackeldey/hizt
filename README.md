@@ -59,8 +59,9 @@ for dataset in hist.axes[0]:
             category=np.array([cat]),
             pt=pt_data,
         )
-        # fill will automatically keep track on what has been
-        # finished processing in `hist.readonly.attrs["finished"]`
+        # `.fill` will not only fill a hist, but also "commit" it to the icechunk repo.
+        # In addition, it adds what has been filled in the commit metadata,
+        # see an example at the end of this snippet.
         hist.fill(**data)
 # ---
 
